@@ -14,9 +14,9 @@ optimizer_type = 'SGD'  # 'SGD' or 'Adam'
 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
 cifar_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
 
-# Splitting dataset into training and validation sets (50,000 train, 10,000 validation)
-train_size = 50000
-val_size = 10000
+# Splitting dataset into training and validation sets
+train_size = int(0.8 * len(cifar_dataset))
+val_size = len(cifar_dataset) - train_size
 train_dataset, val_dataset = random_split(cifar_dataset, [train_size, val_size])
 
 test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, transform=transform, download=True)
@@ -94,7 +94,9 @@ def train_model(model, train_loader, val_loader, num_epochs, criterion, optimize
         val_acc = correct / total * 100
         val_losses.append(val_loss)
         val_accs.append(val_acc)
-        if epoch+1 % 16 == 0:
+        if epoch+1 % 8 == 0:
+            with open('output.txt', 'a') as file:
+                print(f'Epoch [{epoch+1}/{num_epochs}]:\nTraining Loss: {train_loss:.4f}, Training Acc: {train_acc:.2f}%\nValidation Loss: {val_loss:.4f}, Validation Acc: {val_acc:.2f}%\n', file=file)
             print(f'Epoch [{epoch+1}/{num_epochs}]:\nTraining Loss: {train_loss:.4f}, Training Acc: {train_acc:.2f}%\nValidation Loss: {val_loss:.4f}, Validation Acc: {val_acc:.2f}%')
 
     return train_losses, val_losses, train_accs, val_accs
@@ -112,6 +114,8 @@ def evaluate_model(name, model, test_loader):
             correct += (predicted == labels).sum().item()
 
     accuracy = correct / total * 100
+    with open('output.txt', 'a') as file:
+        print(f'Test Accuracy ({name}): {accuracy:.2f}%', file=file)
     print(f'Test Accuracy ({name}): {accuracy:.2f}%')
     return accuracy
 
@@ -179,9 +183,12 @@ def plot_hyperparams(name, lr_avg, bs_avg, ne_avg, learning_rate, batch_size, nu
     plt.show()
     
 def test_hyperparams():
+    with open('output.txt', 'w') as file:
+        print("Beginning Hyperparameter Test", file=file)
+
     # Hyperparameters
     learning_rate = [0.0001,0.0005,0.001,0.005,0.01,0.05,0.1]
-    batch_size = [16,32,64,128,256]
+    batch_size = [8,16,32,64,128,256]
     num_epochs = [5,10,20,35,50,100]
     
     # Adam Optimization
@@ -190,13 +197,17 @@ def test_hyperparams():
     lr_avg = [[] for _ in range(len(learning_rate))]
     bs_avg = [[] for _ in range(len(batch_size))]
     ne_avg = [[] for _ in range(len(num_epochs))]
+    num_tests = len(learning_rate) * len(batch_size) * len(num_epochs)
+    curr_test = 0
     
     # Loop through all hyperparameter possibilities
     for lr in learning_rate:
-      print(f'\nLearning Rate: {lr}\n')
       for bs in batch_size:
-        print(f'\nBatch Size: {bs}\n')
         for ne in num_epochs:
+            curr_test += 1
+            with open('output.txt', 'a') as file:
+                print(f'\nTesting {curr_test}/{num_tests}\nLearning Rate: {lr}\nBatch Size: {bs}\nNumber of Epochs: {ne}\n', file=file)
+            print(f'\nTesting {curr_test}/{num_tests}\nLearning Rate: {lr}\nBatch Size: {bs}\nNumber of Epochs: {ne}\n')
             # Data loaders
             train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
             val_loader = DataLoader(val_dataset, batch_size=bs, shuffle=False)
@@ -236,7 +247,8 @@ def test_hyperparams():
         if results[key]['accuracy'] > largest_acc[0]:
             largest_acc[0] = results[key]['accuracy']
             largest_acc[1] = key
-    
+    with open('output.txt', 'a') as file:
+        print(f'The best hyperparameters for SGD Optimization are {largest_acc[1]} with an accuracy of {largest_acc[0]}', file=file)
     print(f'The best hyperparameters for SGD Optimization are {largest_acc[1]} with an accuracy of {largest_acc[0]}')
 
 # Call the hyperparameter test function - comment out to only test a single model
@@ -244,6 +256,7 @@ test_hyperparams()
 
 # Train and test single model
 # Data loaders
+'''
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
@@ -255,5 +268,6 @@ optimizer = optim.SGD(model.parameters(), lr=.1)
 
 # Training the model
 train_losses, val_losses, train_accs, val_accs = train_model(model, train_loader, val_loader, 50, criterion, optimizer)
-plot_results('SGD', train_losses, val_losses, train_accs, val_accs)
-evaluate_model(f'SGD', model, test_loader)
+plot_results(optimizer_type, train_losses, val_losses, train_accs, val_accs)
+evaluate_model(optimizer_type, model, test_loader)
+'''
