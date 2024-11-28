@@ -13,21 +13,36 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #print(f"Using device: {device}")
 
 # 1. Dataset Loading and Visualization
-def load_and_visualize_data(batch_size):
+def load_and_visualize_data(batch_size, valid_split=0.1):
     transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomCrop(32, padding=4),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, padding=4),
+    transforms.RandomRotation(15),  # Random rotation
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # Color jitter
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    # Load CIFAR-10 dataset
+    dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
     testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
     
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
+    # Split training dataset into training and validation sets
+    num_train = int((1 - valid_split) * len(dataset))
+    num_valid = len(dataset) - num_train
+    train_set, valid_set = torch.utils.data.random_split(dataset, [num_train, num_valid])
+    
+    # Create dataloaders
+    trainloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=2)
+    validloader = DataLoader(valid_set, batch_size=batch_size, shuffle=False, num_workers=2)
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
     
-    return trainloader, testloader, trainset.classes
+    # Visualize a few images from the training set
+    classes = dataset.classes
+    dataiter = iter(trainloader)
+    images, labels = next(dataiter)
+    
+    return trainloader, validloader, testloader, classes
 
 # 2. Model Definitions
 class SimpleCNN(nn.Module):
@@ -112,9 +127,13 @@ class ComplexCNN(nn.Module):
         return x
 
 # 3. Training and Evaluation Functions
-def train_model(model, trainloader, valloader, criterion, optimizer, epochs=20):
+def train_model(model, trainloader, validloader, criterion, optimizer, epochs=20):
     model = model.to(device)  # Ensure model is on the correct device
+    training_losses = []
+    validation_losses = []
+    
     for epoch in range(epochs):
+        # Training Phase
         model.train()
         running_loss = 0.0
         for inputs, labels in trainloader:
@@ -127,34 +146,28 @@ def train_model(model, trainloader, valloader, criterion, optimizer, epochs=20):
             optimizer.step()
             
             running_loss += loss.item()
+        training_loss = running_loss / len(trainloader)
+        training_losses.append(training_loss)
         
-        # Print training loss
-        print(f"Epoch {epoch+1}, Training Loss: {running_loss/len(trainloader):.4f}")
-        
-        # Validation phase
-        model.eval()  # Set model to evaluation mode
-        val_loss = 0.0
-        correct = 0
-        total = 0
+        # Validation Phase
+        model.eval()
+        validation_loss = 0.0
         with torch.no_grad():
-            for inputs, labels in valloader:
+            for inputs, labels in validloader:
                 inputs, labels = inputs.to(device), labels.to(device)  # Move data to GPU/CPU
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
-                val_loss += loss.item()
-                
-                # Calculate accuracy
-                _, predicted = torch.max(outputs, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-
-        val_accuracy = 100 * correct / total
-        print(f"Epoch {epoch+1}, Validation Loss: {val_loss/len(valloader):.4f}, Validation Accuracy: {val_accuracy:.2f}%")
-
+                validation_loss += loss.item()
+        validation_loss = validation_loss / len(validloader)
+        validation_losses.append(validation_loss)
+        
+        print(f"Epoch {epoch+1}/{epochs}, Training Loss: {training_loss:.4f}, Validation Loss: {validation_loss:.4f}")
+    
     print('Finished Training')
+    return training_losses, validation_losses
 
 
-def evaluate_model(model, testloader):
+def test_model(model, testloader):
     model = model.to(device)  # Ensure model is on the correct device
     model.eval()
     correct = 0
@@ -167,7 +180,7 @@ def evaluate_model(model, testloader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     accuracy = 100 * correct / total
-    print(f'Accuracy: {accuracy:.2f}%')
+    print(f'Test Accuracy: {accuracy:.2f}%')
     return accuracy
 
 # 4. Hyperparameter and Model Tuning Function
@@ -199,13 +212,7 @@ def hyperparameter_tuning(param_grid):
             raise ValueError(f"Unsupported model: {model_name}")
         
         # Load data
-        trainloader, testloader, classes = load_and_visualize_data(batch_size)
-        
-        # Split training set for validation (or load a validation set if available)
-        train_size = int(0.8 * len(trainloader.dataset))
-        val_size = len(trainloader.dataset) - train_size
-        train_subset, val_subset = torch.utils.data.random_split(trainloader.dataset, [train_size, val_size])
-        valloader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=2)
+        trainloader, valloader,testloader, classes = load_and_visualize_data(batch_size)
         
         # Define criterion and optimizer
         criterion = nn.CrossEntropyLoss()
@@ -218,7 +225,7 @@ def hyperparameter_tuning(param_grid):
         
         # Train and evaluate
         train_model(model, trainloader, valloader, criterion, optimizer, epochs)
-        accuracy = evaluate_model(model, testloader)
+        accuracy = test_model(model, testloader)
         
         # Save results
         results.append({**params, "accuracy": accuracy})
@@ -249,14 +256,26 @@ def plot_tuning_results(results):
     plt.grid()
     plt.show()
 
+def plot_losses(training_losses, validation_losses):
+    plt.figure(figsize=(10, 6))
+    plt.plot(training_losses, label="Training Loss", marker="o")
+    plt.plot(validation_losses, label="Validation Loss", marker="o")
+    plt.title("Training and Validation Loss Over Epochs")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid()
+    plt.show()
+
 # Main Script Execution
 if __name__ == "__main__":
+    
     param_grid = {
         'model': ["ComplexCNN", "SimpleCNN"],
-        'batch_size': [32, 64],
-        'learning_rate': [0.001, 0.0005],
+        'batch_size': [32, 48, 64],
+        'learning_rate': [0.0001, 0.0005, 0.001, 0.01],
         'optimizer': ['adam', 'sgd'],
-        'epochs': [20, 40]
+        'epochs': [20, 40, 60, 80]
     }
     
     best_params, best_accuracy, results = hyperparameter_tuning(param_grid)
@@ -265,3 +284,16 @@ if __name__ == "__main__":
     
     # Plot results
     plot_tuning_results(results)
+    
+    '''
+    # Train Final Model
+    final_model = ComplexCNN()
+    trainloader, valloader, testloader, _ = load_and_visualize_data(batch_size=64)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optimizer = optim.Adam(final_model.parameters(), lr=0.001)
+    training_losses, validation_losses = train_model(final_model, trainloader, valloader, criterion, optimizer, 10)
+
+    plot_losses(training_losses, validation_losses)
+
+    test_accuracy = test_model(final_model, testloader)
+    '''
