@@ -5,7 +5,6 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from torchvision.models import regnet_x_400mf
 import itertools
 import pandas as pd
 
@@ -50,11 +49,6 @@ class SimpleCNN(nn.Module):
         x = self.dropout(x)
         x = self.fc2(x)
         return x
-
-def get_regnetx_model():
-    model = regnet_x_400mf(weights=None)  # Initialize without pre-trained weights
-    model.fc = nn.Linear(model.fc.in_features, 10)  # Modify output layer for 10 classes
-    return model
 
 class ComplexCNN(nn.Module):
     def __init__(self):
@@ -105,7 +99,7 @@ class ComplexCNN(nn.Module):
         residual = self.residual_conv(x)  # Match input dimensions
         x = self.relu(self.bn5(self.conv5(x)))
         x = self.relu(self.bn6(self.conv6(x)))
-        x += residual  # Add residual connection
+        x = x + residual  # Add residual connection
         x = self.pool3(x)
 
         # Fully Connected Layers
@@ -199,20 +193,18 @@ def hyperparameter_tuning(param_grid):
         # Select the model
         if model_name == "SimpleCNN":
             model = SimpleCNN()
-        elif model_name == "RegNetX":
-            model = get_regnetx_model()
         elif model_name == "ComplexCNN":
             model = ComplexCNN()
         else:
             raise ValueError(f"Unsupported model: {model_name}")
         
         # Load data
-        trainloader, testloader = load_and_visualize_data(batch_size)
+        trainloader, testloader, classes = load_and_visualize_data(batch_size)
         
         # Split training set for validation (or load a validation set if available)
         train_size = int(0.8 * len(trainloader.dataset))
         val_size = len(trainloader.dataset) - train_size
-        val_subset = torch.utils.data.random_split(trainloader.dataset, [train_size, val_size])
+        train_subset, val_subset = torch.utils.data.random_split(trainloader.dataset, [train_size, val_size])
         valloader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=2)
         
         # Define criterion and optimizer
@@ -257,25 +249,14 @@ def plot_tuning_results(results):
     plt.grid()
     plt.show()
 
-def plot_losses(training_losses, validation_losses):
-    plt.figure(figsize=(10, 6))
-    plt.plot(training_losses, label="Training Loss", marker="o")
-    plt.plot(validation_losses, label="Validation Loss", marker="o")
-    plt.title("Training and Validation Loss Over Epochs")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.grid()
-    plt.show()
-
 # Main Script Execution
 if __name__ == "__main__":
     param_grid = {
-        'model': ["SimpleCNN", "RegNetX"],
+        'model': ["ComplexCNN", "SimpleCNN"],
         'batch_size': [32, 64],
         'learning_rate': [0.001, 0.0005],
         'optimizer': ['adam', 'sgd'],
-        'epochs': [10]
+        'epochs': [20, 40]
     }
     
     best_params, best_accuracy, results = hyperparameter_tuning(param_grid)
