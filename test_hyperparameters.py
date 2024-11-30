@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Optimizer
-optimizer_type = 'SGD'  # 'SGD' or 'Adam'
+optimizer_type = 'Adam'  # 'SGD' or 'Adam'
 
 # Dataset and DataLoader
 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
@@ -240,7 +240,7 @@ def test_hyperparams():
             ne_avg[num_epochs.index(ne)].append(acc)
     
     # Plotting the results of hyperparameter test
-    plot_hyperparams('SGD Optimization', lr_avg, bs_avg, ne_avg, learning_rate, batch_size, num_epochs)
+    plot_hyperparams('Adam Optimization', lr_avg, bs_avg, ne_avg, learning_rate, batch_size, num_epochs)
     
     largest_acc = [0,'none']
     for key in results:
@@ -248,8 +248,8 @@ def test_hyperparams():
             largest_acc[0] = results[key]['accuracy']
             largest_acc[1] = key
     with open('output.txt', 'a') as file:
-        print(f'The best hyperparameters for SGD Optimization are {largest_acc[1]} with an accuracy of {largest_acc[0]}', file=file)
-    print(f'The best hyperparameters for SGD Optimization are {largest_acc[1]} with an accuracy of {largest_acc[0]}')
+        print(f'The best hyperparameters for Adam Optimization are {largest_acc[1]} with an accuracy of {largest_acc[0]}', file=file)
+    print(f'The best hyperparameters for Adam Optimization are {largest_acc[1]} with an accuracy of {largest_acc[0]}')
 
 # Call the hyperparameter test function - comment out to only test a single model
 test_hyperparams()
