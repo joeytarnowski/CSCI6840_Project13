@@ -4,6 +4,7 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 # Check for GPU
@@ -12,13 +13,31 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Dataset Loading and Visualization
 def load_and_visualize_data(batch_size, valid_split=0.1):
+    transform = transforms.ToTensor()
+    dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    dataloader = DataLoader(dataset, batch_size=512, shuffle=False, num_workers=2)
+    # Compute mean and standard deviation
+    mean = 0.0
+    std = 0.0
+    num_samples = 0
+
+    for images, _ in dataloader:
+        batch_samples = images.size(0)
+        images = images.view(batch_samples, images.size(1), -1)  # Flatten spatial dimensions
+        mean += images.mean(2).sum(0)  # Sum mean per channel
+        std += images.std(2).sum(0)    # Sum std per channel
+        num_samples += batch_samples
+
+    mean /= num_samples
+    std /= num_samples
+
     transform = transforms.Compose([
     transforms.RandomHorizontalFlip(),
     transforms.RandomCrop(32, padding=4),
     transforms.RandomRotation(15),  # Random rotation
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # Color jitter
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    transforms.Normalize((mean[0], mean[1], mean[2]), (std[0], std[1], mean[2]))
     ])
     
     # Load CIFAR-10 dataset
@@ -41,6 +60,29 @@ def load_and_visualize_data(batch_size, valid_split=0.1):
     images, labels = next(dataiter)
     
     return trainloader, validloader, testloader, classes
+
+class LabelSmoothingCrossEntropy(nn.Module):
+    def __init__(self, epsilon: float = 0.1):
+        super(LabelSmoothingCrossEntropy, self).__init__()
+        self.epsilon = epsilon
+        self.criterion = nn.CrossEntropyLoss(reduction='none')  # Compute loss without reducing it
+
+    def forward(self, x, target):
+        n_class = x.size(1)
+        # Compute cross entropy loss
+        ce_loss = self.criterion(x, target)
+        
+        # Smooth the labels
+        with torch.no_grad():
+            target_one_hot = torch.zeros_like(x).to(x.device)  # Initialize a tensor of zeros (one-hot encoding)
+            target_one_hot.scatter_(1, target.unsqueeze(1), 1)  # Set the target class index to 1
+            target_one_hot = (1 - self.epsilon) * target_one_hot + self.epsilon / n_class  # Apply label smoothing
+        
+        # Compute the loss for each class
+        smooth_loss = (-target_one_hot * F.log_softmax(x, dim=-1)).sum(dim=-1)
+        
+        return smooth_loss.mean()  # Return the mean loss across the batch
+
 
 # Model Definitions
 class ComplexCNN(nn.Module):
@@ -105,7 +147,7 @@ class ComplexCNN(nn.Module):
         return x
 
 # Training and Evaluation Functions
-def train_model(model, trainloader, validloader, criterion, optimizer, epochs, ):
+def train_model(model, trainloader, validloader, criterion, optimizer, epochs):
     model = model.to(device)  # Ensure model is on the correct device
     training_losses = []
     validation_losses = []
@@ -123,7 +165,7 @@ def train_model(model, trainloader, validloader, criterion, optimizer, epochs, )
             
             optimizer.zero_grad()
             outputs = model(inputs)
-            loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels)  # Now using the label smoothing loss
             loss.backward()
             optimizer.step()
             
@@ -148,7 +190,7 @@ def train_model(model, trainloader, validloader, criterion, optimizer, epochs, )
             for inputs, labels in validloader:
                 inputs, labels = inputs.to(device), labels.to(device)  # Move data to GPU/CPU
                 outputs = model(inputs)
-                loss = criterion(outputs, labels)
+                loss = criterion(outputs, labels)  
                 validation_loss += loss.item()
 
                 # Calculate accuracy
@@ -164,7 +206,9 @@ def train_model(model, trainloader, validloader, criterion, optimizer, epochs, )
         print(f"Epoch {epoch+1}/{epochs}, "
               f"Training Loss: {training_loss:.4f}, Training Accuracy: {training_accuracy:.2f}%, "
               f"Validation Loss: {validation_loss:.4f}, Validation Accuracy: {validation_accuracy:.2f}%")
-    
+        # Update LR scheduler
+        scheduler.step(validation_loss)
+
     print('Finished Training')
     return training_losses, validation_losses, training_acc, validation_acc
 
@@ -210,18 +254,26 @@ def plot_results(name, train_losses, val_losses, train_accs, val_accs):
 
 # Main Script Execution
 if __name__ == "__main__":
-    learning_rate = 0.001
-    batch_size = 128
-    num_epochs = 35
-    name = "Adam"
+    learning_rate = 0.05
+    batch_size = 16
+    num_epochs = 100
+    name = "SGD"
 
-    # Train Final Model
+    # Create the model, optimizer, and criterion
     final_model = ComplexCNN()
     trainloader, valloader, testloader, _ = load_and_visualize_data(batch_size=batch_size)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
-    training_losses, validation_losses, training_acc, validation_acc = train_model(final_model, trainloader, valloader, criterion, optimizer, num_epochs)
+    criterion = LabelSmoothingCrossEntropy(epsilon=0.1)  # Use label smoothing with epsilon=0.1
+    optimizer = optim.SGD(final_model.parameters(), lr=learning_rate, weight_decay=1e-3)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
 
+    # Train the model
+    training_losses, validation_losses, training_acc, validation_acc = train_model(
+        final_model, trainloader, valloader, criterion, optimizer, num_epochs
+    )
+
+    # Plot the results
     plot_results(name, training_losses, validation_losses, training_acc, validation_acc)
 
+    # Test the model
     test_accuracy = test_model(final_model, testloader)
+
