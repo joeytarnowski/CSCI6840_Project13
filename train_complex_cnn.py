@@ -37,7 +37,7 @@ def load_and_visualize_data(batch_size, valid_split=0.1):
     transforms.RandomRotation(15),  # Random rotation
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # Color jitter
     transforms.ToTensor(),
-    transforms.Normalize((mean[0], mean[1], mean[2]), (std[0], std[1], mean[2]))
+    transforms.Normalize((mean[0], mean[1], mean[2]), (std[0], std[1], std[2]))
     ])
     
     # Load CIFAR-10 dataset
@@ -276,4 +276,5 @@ if __name__ == "__main__":
 
     # Test the model
     test_accuracy = test_model(final_model, testloader)
+
 
