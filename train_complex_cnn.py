@@ -42,6 +42,45 @@ def load_and_visualize_data(batch_size, valid_split=0.1):
     
     return trainloader, validloader, testloader, classes
 
+class EarlyStopping:
+    def __init__(self, patience=5, delta=0, mode="min"):
+        """
+        Initialize EarlyStopping.
+        
+        Args:
+            patience (int): How many epochs to wait after last improvement before stopping.
+            delta (float): Minimum change to qualify as an improvement.
+            mode (str): "min" for monitoring loss (lower is better), "max" for accuracy (higher is better).
+        """
+        self.patience = patience
+        self.delta = delta
+        self.mode = mode
+        self.best_score = None
+        self.counter = 0
+        self.early_stop = False
+
+    def __call__(self, metric):
+        """
+        Check if training should be stopped.
+        
+        Args:
+            metric (float): Validation metric (loss or accuracy) to monitor.
+        """
+        if self.mode == "min":
+            score = -metric  # Convert loss to a maximization problem
+        else:
+            score = metric  # Monitor accuracy directly
+        
+        if self.best_score is None:
+            self.best_score = score
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.counter = 0
+
 # Model Definitions
 class ComplexCNN(nn.Module):
     def __init__(self):
@@ -105,13 +144,15 @@ class ComplexCNN(nn.Module):
         return x
 
 # Training and Evaluation Functions
-def train_model(model, trainloader, validloader, criterion, optimizer, epochs, ):
+def train_model(model, trainloader, validloader, criterion, optimizer, epochs, patience, mode):
     model = model.to(device)  # Ensure model is on the correct device
     training_losses = []
     validation_losses = []
     training_acc = []
     validation_acc = []
     
+    early_stopping = EarlyStopping(patience=patience, mode=mode)
+
     for epoch in range(epochs):
         # Training Phase
         model.train()
@@ -164,8 +205,16 @@ def train_model(model, trainloader, validloader, criterion, optimizer, epochs, )
         print(f"Epoch {epoch+1}/{epochs}, "
               f"Training Loss: {training_loss:.4f}, Training Accuracy: {training_accuracy:.2f}%, "
               f"Validation Loss: {validation_loss:.4f}, Validation Accuracy: {validation_accuracy:.2f}%")
-    
+        
+        # Early Stopping Check
+        metric = validation_loss if mode == "min" else validation_accuracy
+        early_stopping(metric)
+        if early_stopping.early_stop:
+            print("Early stopping triggered")
+            break
+
     print('Finished Training')
+    
     return training_losses, validation_losses, training_acc, validation_acc
 
 
@@ -214,13 +263,15 @@ if __name__ == "__main__":
     batch_size = 128
     num_epochs = 35
     name = "Adam"
+    patience = 5
+    mode = "min" # Can be "min" or "max"
 
     # Train Final Model
     final_model = ComplexCNN()
     trainloader, valloader, testloader, _ = load_and_visualize_data(batch_size=batch_size)
     criterion = nn.CrossEntropyLoss()
     optimizer = optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
-    training_losses, validation_losses, training_acc, validation_acc = train_model(final_model, trainloader, valloader, criterion, optimizer, num_epochs)
+    training_losses, validation_losses, training_acc, validation_acc = train_model(final_model, trainloader, valloader, criterion, optimizer, num_epochs, patience, mode)
 
     plot_results(name, training_losses, validation_losses, training_acc, validation_acc)
 
